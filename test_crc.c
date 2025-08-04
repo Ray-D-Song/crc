@@ -1,5 +1,5 @@
 #define CRC_IMPL
-#include "src/crc.h"
+#include "crc.h"
 #include "third-party/miniunit.h"
 
 static int destructor_calls = 0;
