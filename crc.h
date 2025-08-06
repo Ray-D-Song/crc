@@ -17,11 +17,10 @@
 #ifndef CRC_H
 #define CRC_H
 
-#include <stdatomic.h>
+#include <functional>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #define RC_MAX_REFS 0x1000000
 
@@ -38,7 +37,8 @@ typedef void (*destructor)(void *);
 typedef struct {
   _Atomic int count;
   destructor free;
-} ref_count;
+} ref_header_t;
+
 
 static inline void *rc_malloc(size_t size, destructor free_fn);
 static inline void *rc_inc(void *p);
@@ -48,26 +48,37 @@ static inline void rc_print_info(void *p);
 static inline bool rc_is_valid(void *p);
 
 #ifdef CRC_IMPL
-static inline void *rc_malloc(size_t size, destructor free_fn) {
-  ref_count *p = (ref_count *)malloc(sizeof(ref_count) + size);
-  if (!p)
-    return NULL;
-  *p = (ref_count){.count = 1, .free = free_fn};
-  return p + 1;
-}
+#include <stdatomic.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+
+#define RC_OBJECT(type) \
+  struct { \
+    rc_header_t rc; \
+    type data; \
+  }
+#define RC_NEW(type, destructor_fn) ({ \
+    typedef RC_OBJECT(type) rc_##type##_t; \
+    rc_##type##_t *obj = malloc(sizeof(rc_##type##_t)); \
+    if (obj) { \
+      obj->rc = (rc_header_t)(.count = 1, .destructor = destructor_fn}; \
+    } \
+    obj; \
+  }) \
 
 static inline void *rc_inc(void *p) {
   if (!p)
     return NULL;
-  ref_count *rc = (ref_count *)p - 1;
-  atomic_fetch_add_explicit(&rc->count, 1, memory_order_relaxed);
+  ref_header_t *header = (ref_header_t *)p - 1;
+  atomic_fetch_add_explicit(&header->count, 1, memory_order_relaxed);
   return p;
 }
 
 static inline void *rc_dec(void *p) {
   if (!p)
     return NULL;
-  ref_count *rc = (ref_count *)p - 1;
+  ref_header_t *rc = (ref_header_t *)p - 1;
   if (atomic_fetch_sub_explicit(&rc->count, 1, memory_order_relaxed) == 1) {
     rc->free(p);
     free(rc);
@@ -79,7 +90,7 @@ static inline void *rc_dec(void *p) {
 static inline int rc_get_count(void *p) {
   if (!p)
     return -1;
-  ref_count *rc = (ref_count *)p - 1;
+  ref_header_t *rc = (ref_header_t *)p - 1;
   return atomic_load(&rc->count);
 }
 static inline void rc_print_info(void *p) {
@@ -88,7 +99,7 @@ static inline void rc_print_info(void *p) {
     return;
   }
 
-  ref_count *rc = (ref_count *)p - 1;
+  ref_header_t *rc = (ref_header_t *)p - 1;
   printf("RC Object: ptr=%p, count=%d, destructor=%p\n", p,
          atomic_load(&rc->count), (void *)rc->free);
 }
@@ -98,7 +109,7 @@ static inline bool rc_is_valid(void *p) {
     return false;
   if ((uintptr_t)p % sizeof(void *) != 0)
     return false;
-  ref_count *rc = (ref_count *)p - 1;
+  ref_header_t *rc = (ref_header_t *)p - 1;
   int count = atomic_load(&rc->count);
   if (count <= 0 || count > RC_MAX_REFS)
     return false;
@@ -108,8 +119,6 @@ static inline bool rc_is_valid(void *p) {
 
   return true;
 }
-
-#define RC_NEW(type) ((type *)rc_malloc(sizeof(type), free))
 
 #define RC_CLONE_SAFE(ptr)                                                     \
   ({                                                                           \

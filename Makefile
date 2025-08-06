@@ -21,6 +21,10 @@ debug: CFLAGS += -DRC_DEBUG_MODE
 debug: $(TARGET)
 	./$(TARGET)
 
+asan: CFLAGS += -fsanitize=address
+asan: $(TARGET)
+	./$(TARGET)
+
 valgrind: $(TARGET)
 	valgrind --leak-check=full --show-leak-kinds=all ./$(TARGET)
 
@@ -32,8 +36,9 @@ help:
 	@echo "  all      - Build the test executable"
 	@echo "  test     - Build and run tests"
 	@echo "  debug    - Build and run tests with debug output"
+	@echo "  asan     - Build and run tests with AddressSanitizer"
 	@echo "  valgrind - Run tests with memory leak detection"
 	@echo "  clean    - Remove built files"
 	@echo "  help     - Show this help message"
 
-.PHONY: all test debug valgrind clean help
+.PHONY: all test debug asan valgrind clean help
