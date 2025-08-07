@@ -1,5 +1,7 @@
 #include <stdlib.h>
+#ifndef CRC_IMPL
 #define CRC_IMPL
+#endif /* ifndef CRC_IMPL */
 #include "crc.h"
 #include "third-party/miniunit.h"
 
@@ -10,18 +12,22 @@ void test_destructor(void *ptr) {
 }
 
 MU_TEST(test_rc_malloc_basic) {
-  void *ptr = rc_malloc(sizeof(int), free);
+  void *ptr = rc_malloc(sizeof(int), NULL);
   mu_check(ptr != NULL);
 
   mu_assert_int_eq(1, rc_get_count(ptr));
 
-  rc_dec(ptr);
+  ptr = rc_dec(ptr);
+
+  mu_check(ptr == NULL);
 }
 
 MU_TEST(test_rc_malloc_zero_size) {
-  void *ptr = rc_malloc(0, free);
+  void *ptr = rc_malloc(0, NULL);
   mu_check(ptr != NULL);
-  rc_dec(ptr);
+  ptr = rc_dec(ptr);
+
+  mu_check(ptr == NULL);
 }
 
 MU_TEST(test_rc_inc_basic) {
@@ -100,32 +106,16 @@ MU_TEST(test_rc_print_info) {
 }
 
 MU_TEST(test_RC_NEW_macro) {
-  int *ptr = RC_NEW(int);
+  typedef RC_OBJECT(int) rc_int_t;
+  rc_int_t *ptr = RC_NEW(int, free);
   mu_check(ptr != NULL);
   mu_assert_int_eq(1, rc_get_count(ptr));
 
-  *ptr = 456;
-  mu_assert_int_eq(456, *ptr);
+  ptr->data = 456;
+  mu_assert_int_eq(456, ptr->data);
 
   RC_DROP(ptr);
   mu_check(ptr == NULL);
-}
-
-MU_TEST(test_RC_CLONE_macro) {
-  int *original = RC_NEW(int);
-  *original = 789;
-
-  int *clone = RC_CLONE(original);
-  mu_check(clone == original);
-  mu_assert_int_eq(2, rc_get_count(original));
-  mu_assert_int_eq(789, *clone);
-
-  RC_DROP(original);
-  mu_assert_int_eq(1, rc_get_count(clone));
-  mu_assert_int_eq(789, *clone);
-
-  RC_DROP(clone);
-  mu_check(clone == NULL);
 }
 
 MU_TEST(test_RC_NEW_ARRAY_macro) {
@@ -155,31 +145,6 @@ MU_TEST(test_RC_NEW_WITH_DESTRUCTOR_macro) {
   mu_assert_int_eq(1, destructor_calls);
 }
 
-MU_TEST(test_multiple_references) {
-  int *ptr1 = RC_NEW(int);
-  *ptr1 = 555;
-
-  int *ptr2 = RC_CLONE(ptr1);
-  int *ptr3 = RC_CLONE(ptr1);
-  int *ptr4 = RC_CLONE(ptr2);
-
-  mu_assert_int_eq(4, rc_get_count(ptr1));
-  mu_assert_int_eq(555, *ptr4);
-
-  RC_DROP(ptr1);
-  mu_assert_int_eq(3, rc_get_count(ptr2));
-
-  RC_DROP(ptr2);
-  mu_assert_int_eq(2, rc_get_count(ptr3));
-
-  RC_DROP(ptr3);
-  mu_assert_int_eq(1, rc_get_count(ptr4));
-  mu_assert_int_eq(555, *ptr4);
-
-  RC_DROP(ptr4);
-  mu_check(ptr4 == NULL);
-}
-
 MU_TEST_SUITE(test_suite) {
   MU_RUN_TEST(test_rc_malloc_basic);
   MU_RUN_TEST(test_rc_malloc_zero_size);
@@ -189,10 +154,8 @@ MU_TEST_SUITE(test_suite) {
   MU_RUN_TEST(test_rc_is_valid);
   MU_RUN_TEST(test_rc_print_info);
   MU_RUN_TEST(test_RC_NEW_macro);
-  MU_RUN_TEST(test_RC_CLONE_macro);
   MU_RUN_TEST(test_RC_NEW_ARRAY_macro);
   MU_RUN_TEST(test_RC_NEW_WITH_DESTRUCTOR_macro);
-  MU_RUN_TEST(test_multiple_references);
 }
 
 int main() {

@@ -17,7 +17,7 @@
 #ifndef CRC_H
 #define CRC_H
 
-#include <functional>
+#include <_stdlib.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -37,8 +37,7 @@ typedef void (*destructor)(void *);
 typedef struct {
   _Atomic int count;
   destructor free;
-} ref_header_t;
-
+} rc_header_t;
 
 static inline void *rc_malloc(size_t size, destructor free_fn);
 static inline void *rc_inc(void *p);
@@ -46,31 +45,40 @@ static inline void *rc_dec(void *p);
 static inline int rc_get_count(void *p);
 static inline void rc_print_info(void *p);
 static inline bool rc_is_valid(void *p);
+static inline void *rc_ref(void *p);
+static inline void *rc_weak_ref(void *p);
 
 #ifdef CRC_IMPL
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-
-#define RC_OBJECT(type) \
-  struct { \
-    rc_header_t rc; \
-    type data; \
+#define RC_OBJECT(type)                                                        \
+  struct {                                                                     \
+    rc_header_t rc;                                                            \
+    type data;                                                                 \
   }
-#define RC_NEW(type, destructor_fn) ({ \
-    typedef RC_OBJECT(type) rc_##type##_t; \
-    rc_##type##_t *obj = malloc(sizeof(rc_##type##_t)); \
-    if (obj) { \
-      obj->rc = (rc_header_t)(.count = 1, .destructor = destructor_fn}; \
-    } \
-    obj; \
-  }) \
+#define RC_NEW(type, destructor_fn)                                            \
+  ({                                                                           \
+    rc_##type##_t *obj = malloc(sizeof(rc_##type##_t));                        \
+    if (obj) {                                                                 \
+      obj->rc = (rc_header_t){.count = 1, .free = destructor_fn};              \
+    }                                                                          \
+    obj;                                                                       \
+  })
+
+static inline void *rc_malloc(size_t size, destructor free_fn) {
+  rc_header_t *p = (rc_header_t *)malloc(sizeof(rc_header_t) + size);
+  if (!p)
+    return NULL;
+  *p = (rc_header_t){.count = 1, .free = free_fn};
+  return p + 1;
+}
 
 static inline void *rc_inc(void *p) {
   if (!p)
     return NULL;
-  ref_header_t *header = (ref_header_t *)p - 1;
+  rc_header_t *header = (rc_header_t *)p - 1;
   atomic_fetch_add_explicit(&header->count, 1, memory_order_relaxed);
   return p;
 }
@@ -78,9 +86,11 @@ static inline void *rc_inc(void *p) {
 static inline void *rc_dec(void *p) {
   if (!p)
     return NULL;
-  ref_header_t *rc = (ref_header_t *)p - 1;
+  rc_header_t *rc = (rc_header_t *)p - 1;
   if (atomic_fetch_sub_explicit(&rc->count, 1, memory_order_relaxed) == 1) {
-    rc->free(p);
+    if (rc->free && rc->free != free) {
+      rc->free(p);
+    }
     free(rc);
     return NULL;
   }
@@ -90,7 +100,7 @@ static inline void *rc_dec(void *p) {
 static inline int rc_get_count(void *p) {
   if (!p)
     return -1;
-  ref_header_t *rc = (ref_header_t *)p - 1;
+  rc_header_t *rc = (rc_header_t *)p - 1;
   return atomic_load(&rc->count);
 }
 static inline void rc_print_info(void *p) {
@@ -99,7 +109,7 @@ static inline void rc_print_info(void *p) {
     return;
   }
 
-  ref_header_t *rc = (ref_header_t *)p - 1;
+  rc_header_t *rc = (rc_header_t *)p - 1;
   printf("RC Object: ptr=%p, count=%d, destructor=%p\n", p,
          atomic_load(&rc->count), (void *)rc->free);
 }
@@ -109,7 +119,7 @@ static inline bool rc_is_valid(void *p) {
     return false;
   if ((uintptr_t)p % sizeof(void *) != 0)
     return false;
-  ref_header_t *rc = (ref_header_t *)p - 1;
+  rc_header_t *rc = (rc_header_t *)p - 1;
   int count = atomic_load(&rc->count);
   if (count <= 0 || count > RC_MAX_REFS)
     return false;
@@ -120,14 +130,6 @@ static inline bool rc_is_valid(void *p) {
   return true;
 }
 
-#define RC_CLONE_SAFE(ptr)                                                     \
-  ({                                                                           \
-    typeof(ptr) _tmp = (typeof(ptr))rc_inc(ptr);                               \
-    if (!_tmp && ptr)                                                          \
-      RC_ERROR("RC_CLONE failed for %p", ptr);                                 \
-    _tmp;                                                                      \
-  })
-
 #define RC_DROP_SAFE(ptr)                                                      \
   do {                                                                         \
     if (ptr && !rc_is_valid(ptr)) {                                            \
@@ -136,8 +138,6 @@ static inline bool rc_is_valid(void *p) {
     }                                                                          \
     ptr = (typeof(ptr))rc_dec(ptr);                                            \
   } while (0)
-
-#define RC_CLONE(ptr) ((typeof(ptr))rc_inc(ptr))
 
 #define RC_DROP(ptr)                                                           \
   do {                                                                         \
