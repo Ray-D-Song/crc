@@ -58,14 +58,8 @@ static inline void *rc_weak_ref(void *p);
     rc_header_t rc;                                                            \
     type data;                                                                 \
   }
-#define RC_NEW(type, destructor_fn)                                            \
-  ({                                                                           \
-    rc_##type##_t *obj = malloc(sizeof(rc_##type##_t));                        \
-    if (obj) {                                                                 \
-      obj->rc = (rc_header_t){.count = 1, .free = destructor_fn};              \
-    }                                                                          \
-    obj;                                                                       \
-  })
+#define RC_NEW(object_type, destructor_fn)                                            \
+  ((object_type *)rc_malloc(sizeof(object_type), destructor_fn))
 
 static inline void *rc_malloc(size_t size, destructor free_fn) {
   rc_header_t *p = (rc_header_t *)malloc(sizeof(rc_header_t) + size);
@@ -117,8 +111,7 @@ static inline void rc_print_info(void *p) {
 static inline bool rc_is_valid(void *p) {
   if (!p)
     return false;
-  if ((uintptr_t)p % sizeof(void *) != 0)
-    return false;
+  if ((uintptr_t)p % sizeof(void *) != 0) return false;
   rc_header_t *rc = (rc_header_t *)p - 1;
   int count = atomic_load(&rc->count);
   if (count <= 0 || count > RC_MAX_REFS)

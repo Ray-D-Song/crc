@@ -110,6 +110,7 @@ static void (*minunit_teardown)(void) = NULL;
 
 /*  Test runner */
 #define MU_RUN_TEST(test) MU__SAFE_BLOCK(\
+	printf("[TEST START] %s\n", #test);\
 	if (minunit_real_timer==0 && minunit_proc_timer==0) {\
 		minunit_real_timer = mu_timer_real();\
 		minunit_proc_timer = mu_timer_cpu();\
@@ -125,6 +126,7 @@ static void (*minunit_teardown)(void) = NULL;
 	}\
 	(void)fflush(stdout);\
 	if (minunit_teardown) (*minunit_teardown)();\
+	printf("[TEST END] %s\n", #test);\
 )
 
 /*  Report */
